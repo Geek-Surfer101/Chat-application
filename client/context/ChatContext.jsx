@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { AuthContext } from "./AuthContext";
+import { apiFetch } from "../src/lib/api";
 
 // Create and export the ChatContext
 export const ChatContext = createContext();
@@ -11,12 +12,12 @@ export const ChatProvider = ({ children }) => {
     const [selectedUser, setSelectedUser] = useState(null);
     const [unseenMessages, setUnseenMessages] = useState({});
 
-    const { socket, axios } = useContext(AuthContext);
+    const { socket } = useContext(AuthContext);
 
-    // Fetch all users for the sidebar
+    // Fetch all users (friends) for the sidebar
     const getUsers = async () => {
         try {
-            const { data } = await axios.get("/api/messages/user");
+            const data = await apiFetch("/messages/user");
             if (data.success) {
                 setUsers(data.users);
                 setUnseenMessages(data.unseenMessages);
@@ -29,7 +30,7 @@ export const ChatProvider = ({ children }) => {
     // Fetch messages for the selected user
     const getMessages = async (userId) => {
         try {
-            const { data } = await axios.get(`/api/messages/${userId}`);
+            const data = await apiFetch(`/messages/${userId}`);
             if (data.success) {
                 setMessages(data.messages);
             }

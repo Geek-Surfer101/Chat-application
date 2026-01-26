@@ -3,6 +3,7 @@ import assets from "../assets/assets";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../context/AuthContext";
 import { ChatContext } from "../../context/ChatContext.jsx";
+import InvitationPanel from "./InvitationPanel";
 
 const Sidebar = () => {
     const {
@@ -26,9 +27,15 @@ const Sidebar = () => {
           )
         : users;
 
+
     useEffect(() => {
         getUsers();
     }, []);
+
+    // Refresh friends list after accepting an invite
+    const handleFriendAdded = () => {
+        getUsers();
+    };
 
     return (
         <div
@@ -36,6 +43,7 @@ const Sidebar = () => {
                 selectedUser ? "max-md:hidden" : ""
             } `}
         >
+            <InvitationPanel onFriendAdded={handleFriendAdded} />
             <div className="pb-5">
                 <div className="flex justify-between items-center">
                     <img src={assets.logo} alt="logo" className="max-w-40" />
