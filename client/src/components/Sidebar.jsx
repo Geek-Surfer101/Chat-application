@@ -3,7 +3,8 @@ import assets from "../assets/assets";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../context/AuthContext";
 import { ChatContext } from "../../context/ChatContext.jsx";
-import InvitationPanel from "./InvitationPanel";
+import AddFriendModal from "./AddFriendModal";
+import { UserPlus } from "lucide-react";
 
 const Sidebar = () => {
     const {
@@ -18,13 +19,14 @@ const Sidebar = () => {
     const { logout, onlineUser } = useContext(AuthContext);
 
     const [input, setInput] = useState("");
+    const [showAddFriend, setShowAddFriend] = useState(false);
 
     const navigate = useNavigate();
 
     const filteredUsers = input
         ? users.filter((user) =>
-              user.fullName.toLowerCase().includes(input.toLowerCase())
-          )
+            user.fullName.toLowerCase().includes(input.toLowerCase())
+        )
         : users;
 
 
@@ -39,11 +41,16 @@ const Sidebar = () => {
 
     return (
         <div
-            className={`bg-[#8185B2]/10 h-full p-5 rounded-r-xl overflow-y-scroll text-white ${
-                selectedUser ? "max-md:hidden" : ""
-            } `}
+            className={`bg-[#8185B2]/10 h-full p-5 rounded-r-xl overflow-y-scroll text-white ${selectedUser ? "max-md:hidden" : ""
+                } `}
         >
-            <InvitationPanel onFriendAdded={handleFriendAdded} />
+            {showAddFriend && (
+                <AddFriendModal
+                    onClose={() => setShowAddFriend(false)}
+                    onFriendAdded={handleFriendAdded}
+                />
+            )}
+
             <div className="pb-5">
                 <div className="flex justify-between items-center">
                     <img src={assets.logo} alt="logo" className="max-w-40" />
@@ -71,18 +78,27 @@ const Sidebar = () => {
                     </div>
                 </div>
 
-                <div className="bg-[#282142] rounded-full flex items-center gap-2 py-3 px-4 mt-5">
-                    <img
-                        src={assets.search_icon}
-                        alt="Search"
-                        className="w-3"
-                    />
-                    <input
-                        onChange={(e) => setInput(e.target.value)}
-                        type="text"
-                        className="bg-transparent border-none outline-none text-white text-xs placeholder-[#c8c8c8] flex-1"
-                        placeholder="Search User..."
-                    />
+                <div className="flex gap-2 mt-5">
+                    <div className="bg-[#282142] rounded-full flex items-center gap-2 py-3 px-4 flex-1">
+                        <img
+                            src={assets.search_icon}
+                            alt="Search"
+                            className="w-3"
+                        />
+                        <input
+                            onChange={(e) => setInput(e.target.value)}
+                            type="text"
+                            className="bg-transparent border-none outline-none text-white text-xs placeholder-[#c8c8c8] flex-1"
+                            placeholder="Search User..."
+                        />
+                    </div>
+                    <button
+                        onClick={() => setShowAddFriend(true)}
+                        className="bg-violet-600 hover:bg-violet-700 transition-colors w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                        title="Add Friend"
+                    >
+                        <UserPlus size={18} />
+                    </button>
                 </div>
             </div>
 
@@ -97,9 +113,8 @@ const Sidebar = () => {
                             }));
                         }}
                         key={index}
-                        className={`relative flex items-center gap-2 p-2 pl-4 rounded cursor-pointer max-sm:text-sm ${
-                            selectedUser?._id === user._id && "bg-[#282142]/50"
-                        }`}
+                        className={`relative flex items-center gap-2 p-2 pl-4 rounded cursor-pointer max-sm:text-sm ${selectedUser?._id === user._id && "bg-[#282142]/50"
+                            }`}
                     >
                         <img
                             src={user?.profilePic || assets.avatar_icon}
