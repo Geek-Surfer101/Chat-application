@@ -30,9 +30,10 @@ export const signup = async (req, res) => {
         });
 
         const token = generateToken(newUser._id);
+        const safeUser = await User.findById(newUser._id).select("-password");
         res.json({
             success: true,
-            userData: newUser,
+            userData: safeUser,
             token,
             message: "Account created successfully",
         });
@@ -50,6 +51,12 @@ export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
         const userData = await User.findOne({ email });
+        if (!userData) {
+            return res.json({
+                success: false,
+                message: "Invalid credentials",
+            });
+        }
 
         const isPasswordCorrect = await bcrypt.compare(
             password,
@@ -62,9 +69,10 @@ export const login = async (req, res) => {
             });
         }
         const token = generateToken(userData._id);
+        const safeUser = await User.findById(userData._id).select("-password");
         res.json({
             success: true,
-            userData,
+            userData: safeUser,
             token,
             message: "Login successful",
         });

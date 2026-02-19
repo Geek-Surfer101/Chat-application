@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 
 const invitationSchema = new mongoose.Schema({
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -10,4 +10,6 @@ const invitationSchema = new mongoose.Schema({
 
 invitationSchema.index({ sender: 1, receiver: 1 }, { unique: true });
 
-module.exports = mongoose.model('Invitation', invitationSchema);
+const Invitation = mongoose.model('Invitation', invitationSchema);
+
+export default Invitation;

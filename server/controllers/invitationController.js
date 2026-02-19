@@ -31,10 +31,21 @@ export const sendInvitation = async (req, res) => {
       if (existing.status === 'pending') {
         return res.status(400).json({ success: false, message: "Invitation received or already sent." });
       }
-      // If rejected, allow re-sending? For now let's say "Invitation status is existing.status"
-      // Or simply allow new one if rejected? Let's just block to keep it simple, or maybe update the existing one?
-      // Let's block for now to prevent spam.
-      return res.status(400).json({ success: false, message: "Invitation pending or already processed." });
+
+      // If previously rejected, re-use the same document as a fresh pending request.
+      existing.sender = senderId;
+      existing.receiver = receiver._id;
+      existing.status = "pending";
+      existing.updatedAt = new Date();
+      await existing.save();
+
+      const receiverSocketId = getSocketId(receiver._id);
+      if (receiverSocketId) {
+        const enrichedInvitation = await Invitation.findById(existing._id).populate("sender", "fullName email");
+        io.to(receiverSocketId).emit("newInvitation", enrichedInvitation);
+      }
+
+      return res.json({ success: true, message: "Invitation sent" });
     }
 
     const newInvitation = await Invitation.create({ sender: senderId, receiver: receiver._id });
@@ -75,8 +86,12 @@ export const acceptInvitation = async (req, res) => {
     if (!invitation) {
       return res.status(404).json({ success: false, message: "Invitation not found" });
     }
+    if (invitation.status !== "pending") {
+      return res.status(400).json({ success: false, message: "Invitation is no longer pending" });
+    }
 
     invitation.status = "accepted";
+    invitation.updatedAt = new Date();
     await invitation.save();
 
     // Real-time notification to the SENDER that their invite was accepted
@@ -104,8 +119,12 @@ export const rejectInvitation = async (req, res) => {
     if (!invitation) {
       return res.status(404).json({ success: false, message: "Invitation not found" });
     }
+    if (invitation.status !== "pending") {
+      return res.status(400).json({ success: false, message: "Invitation is no longer pending" });
+    }
 
     invitation.status = "rejected";
+    invitation.updatedAt = new Date();
     await invitation.save();
 
     res.json({ success: true, message: "Invitation rejected" });

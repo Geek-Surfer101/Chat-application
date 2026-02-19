@@ -12,15 +12,27 @@ export const ChatProvider = ({ children }) => {
     const [selectedUser, setSelectedUser] = useState(null);
     const [unseenMessages, setUnseenMessages] = useState({});
 
-    const { socket } = useContext(AuthContext);
+    const { socket, authUser } = useContext(AuthContext);
 
     // Fetch all users (friends) for the sidebar
     const getUsers = async () => {
         try {
             const data = await apiFetch("/messages/user");
+
             if (data.success) {
-                setUsers(data.users);
-                setUnseenMessages(data.unseenMessages);
+                // Ensure users is always an array
+                const validUsers = Array.isArray(data.users) ? data.users : [];
+                setUsers(validUsers);
+                setUnseenMessages(data.unseenMessages || {});
+
+                // If selected user is no longer in friend list, clear selected chat.
+                if (
+                    selectedUser &&
+                    !validUsers.some((user) => user._id === selectedUser._id)
+                ) {
+                    setSelectedUser(null);
+                    setMessages([]);
+                }
             }
         } catch (error) {
             toast.error(error.message);
@@ -42,10 +54,10 @@ export const ChatProvider = ({ children }) => {
     // Send a message to the selected user
     const sendMessage = async (messageData) => {
         try {
-            const { data } = await axios.post(
-                `/api/messages/send/${selectedUser._id}`,
-                messageData
-            );
+            const data = await apiFetch(`/messages/send/${selectedUser._id}`, {
+                method: "POST",
+                body: JSON.stringify(messageData),
+            });
             if (data.success) {
                 setMessages((prevMessages) => [
                     ...prevMessages,
@@ -66,7 +78,9 @@ export const ChatProvider = ({ children }) => {
             if (selectedUser && newMessage.senderId === selectedUser._id) {
                 newMessage.seen = true;
                 setMessages((prevMessages) => [...prevMessages, newMessage]);
-                axios.put(`/api/messages/mark/${newMessage._id}`);
+                apiFetch(`/messages/mark/${newMessage._id}`, {
+                    method: "PUT",
+                }).catch(() => {});
             } else {
                 setUnseenMessages((prevUnseenMessages) => ({
                     ...prevUnseenMessages,
@@ -92,6 +106,16 @@ export const ChatProvider = ({ children }) => {
         };
         // eslint-disable-next-line
     }, [socket, selectedUser]);
+
+    // Reset all chat state when user logs out or switches accounts.
+    useEffect(() => {
+        if (!authUser) {
+            setMessages([]);
+            setUsers([]);
+            setSelectedUser(null);
+            setUnseenMessages({});
+        }
+    }, [authUser]);
 
     const value = {
         messages,

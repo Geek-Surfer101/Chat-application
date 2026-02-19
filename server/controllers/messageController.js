@@ -7,29 +7,35 @@ import { io, userSocketMap } from "../server.js";
 import { areUsersFriends } from "../lib/friendship.js";
 
 // get all users except the logged in user
+import Invitation from "../models/Invitation.js";
+
+// get all users except the logged in user
 export const getUsersForSidebar = async (req, res) => {
     try {
         const userId = req.user._id;
 
         // 1. Find all accepted invitations where the current user is sender OR receiver
-        // This gives us the IDs of all friends efficiently
-        const friendIds = await import("../models/Invitation.js").then(mod => mod.default.find({
+        const invitations = await Invitation.find({
             $or: [
                 { sender: userId, status: "accepted" },
                 { receiver: userId, status: "accepted" }
             ]
-        }).select("sender receiver"));
+        }).select("sender receiver");
 
         // Extract the *other* user's ID from each invitation
-        const friendUserIds = friendIds.map(inv =>
+        const friendUserIds = invitations.map(inv =>
             inv.sender.toString() === userId.toString() ? inv.receiver : inv.sender
         );
+
+        // Optimization: If no friends, return early
+        if (friendUserIds.length === 0) {
+            return res.json({ success: true, users: [], unseenMessages: {} });
+        }
 
         // 2. Fetch only these friend users
         const friends = await User.find({ _id: { $in: friendUserIds } }).select("-password");
 
         // 3. Count unseen messages for these friends
-        // Optimization: Use aggregation or Promise.all instead of sequential await in loop
         const unseenMessages = {};
 
         await Promise.all(friends.map(async (friend) => {
@@ -95,7 +101,26 @@ export const getMessages = async (req, res) => {
 export const markMessagesAsSeen = async (req, res) => {
     try {
         const { id } = req.params;
-        await Message.findByIdAndUpdate(id, { seen: true });
+        const userId = req.user._id;
+        const message = await Message.findById(id);
+
+        if (!message) {
+            return res.status(404).json({
+                success: false,
+                message: "Message not found",
+            });
+        }
+
+        // Only the receiver can mark a message as seen
+        if (message.receiverId.toString() !== userId.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "Not allowed",
+            });
+        }
+
+        message.seen = true;
+        await message.save();
         res.json({
             success: true,
         });
