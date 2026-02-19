@@ -5,7 +5,11 @@ import jwt from "jsonwebtoken";
 
 export const protectRoute = async (req, res, next) => {
     try {
-        const token = req.headers.token;
+        let token = req.headers.token;
+
+        if (!token && req.headers.authorization) {
+            token = req.headers.authorization.split(" ")[1];
+        }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decoded.userId).select("-password");
@@ -13,7 +17,7 @@ export const protectRoute = async (req, res, next) => {
             return res.json({
                 success: false,
                 message: "User not found",
-            }); 
+            });
         }
         req.user = user;
         next();
@@ -23,6 +27,6 @@ export const protectRoute = async (req, res, next) => {
         res.json({
             success: false,
             message: error.message,
-        }); 
+        });
     }
 }

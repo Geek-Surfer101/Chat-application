@@ -37,6 +37,10 @@ io.on("connection", (socket) => {
     });
 });
 
+export function getSocketId(userId) {
+    return userSocketMap[userId];
+}
+
 // Middleware setup
 app.use(express.json({ limit: "4mb" }));
 app.use(cors());

@@ -6,36 +6,51 @@ import cloudinary from "../lib/cloudinary.js";
 import { io, userSocketMap } from "../server.js";
 import { areUsersFriends } from "../lib/friendship.js";
 
+// get all users except the logged in user
 export const getUsersForSidebar = async (req, res) => {
     try {
         const userId = req.user._id;
-        const allUsers = await User.find({ _id: { $ne: userId } }).select("-password");
-        // Only show users who are friends (accepted invitation)
-        const friends = [];
+
+        // 1. Find all accepted invitations where the current user is sender OR receiver
+        // This gives us the IDs of all friends efficiently
+        const friendIds = await import("../models/Invitation.js").then(mod => mod.default.find({
+            $or: [
+                { sender: userId, status: "accepted" },
+                { receiver: userId, status: "accepted" }
+            ]
+        }).select("sender receiver"));
+
+        // Extract the *other* user's ID from each invitation
+        const friendUserIds = friendIds.map(inv =>
+            inv.sender.toString() === userId.toString() ? inv.receiver : inv.sender
+        );
+
+        // 2. Fetch only these friend users
+        const friends = await User.find({ _id: { $in: friendUserIds } }).select("-password");
+
+        // 3. Count unseen messages for these friends
+        // Optimization: Use aggregation or Promise.all instead of sequential await in loop
         const unseenMessages = {};
-        for (const user of allUsers) {
-            if (await areUsersFriends(userId, user._id)) {
-                friends.push(user);
-                const messages = await Message.find({
-                    senderId: user._id,
-                    receiverId: userId,
-                    seen: false,
-                });
-                if (messages.length > 0) {
-                    unseenMessages[user._id] = messages.length;
-                }
+
+        await Promise.all(friends.map(async (friend) => {
+            const count = await Message.countDocuments({
+                senderId: friend._id,
+                receiverId: userId,
+                seen: false
+            });
+            if (count > 0) {
+                unseenMessages[friend._id] = count;
             }
-        }
+        }));
+
         res.json({
             success: true,
             users: friends,
             unseenMessages: unseenMessages,
         });
     } catch (error) {
-        res.json({
-            success: false,
-            message: error.message,
-        });
+        console.error("Error in getUsersForSidebar: ", error.message);
+        res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 };
 

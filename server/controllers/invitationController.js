@@ -1,5 +1,6 @@
 import Invitation from "../models/Invitation.js";
 import User from "../models/User.js";
+import { getSocketId, io } from "../server.js";
 
 // Send an invitation
 export const sendInvitation = async (req, res) => {
@@ -7,21 +8,48 @@ export const sendInvitation = async (req, res) => {
     const { receiverEmail } = req.body;
     const senderId = req.user._id;
     const receiver = await User.findOne({ email: receiverEmail });
+
     if (!receiver) {
-      return res.status(404).json({ success: false, message: "Receiver not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
     if (receiver._id.equals(senderId)) {
       return res.status(400).json({ success: false, message: "Cannot invite yourself" });
     }
-    // Prevent duplicate invitations
-    const existing = await Invitation.findOne({ sender: senderId, receiver: receiver._id });
+
+    // Check for ANY existing invitation between these two users (sent or received)
+    const existing = await Invitation.findOne({
+      $or: [
+        { sender: senderId, receiver: receiver._id },
+        { sender: receiver._id, receiver: senderId }
+      ]
+    });
+
     if (existing) {
-      return res.status(400).json({ success: false, message: "Invitation already sent" });
+      if (existing.status === 'accepted') {
+        return res.status(400).json({ success: false, message: "You are already friends!" });
+      }
+      if (existing.status === 'pending') {
+        return res.status(400).json({ success: false, message: "Invitation received or already sent." });
+      }
+      // If rejected, allow re-sending? For now let's say "Invitation status is existing.status"
+      // Or simply allow new one if rejected? Let's just block to keep it simple, or maybe update the existing one?
+      // Let's block for now to prevent spam.
+      return res.status(400).json({ success: false, message: "Invitation pending or already processed." });
     }
-    await Invitation.create({ sender: senderId, receiver: receiver._id });
+
+    const newInvitation = await Invitation.create({ sender: senderId, receiver: receiver._id });
+
+    // Real-time notification
+    const receiverSocketId = getSocketId(receiver._id);
+    if (receiverSocketId) {
+      const enrichedInvitation = await Invitation.findById(newInvitation._id).populate("sender", "fullName email");
+      io.to(receiverSocketId).emit("newInvitation", enrichedInvitation);
+    }
+
     res.json({ success: true, message: "Invitation sent" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error(error);
+    res.status(500).json({ success: false, message: "Internal Error" });
   }
 };
 
@@ -43,11 +71,23 @@ export const acceptInvitation = async (req, res) => {
     const { invitationId } = req.body;
     const userId = req.user._id;
     const invitation = await Invitation.findOne({ _id: invitationId, receiver: userId });
+
     if (!invitation) {
       return res.status(404).json({ success: false, message: "Invitation not found" });
     }
+
     invitation.status = "accepted";
     await invitation.save();
+
+    // Real-time notification to the SENDER that their invite was accepted
+    const senderSocketId = getSocketId(invitation.sender);
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("invitationAccepted", {
+        invitationId,
+        accepterId: userId
+      });
+    }
+
     res.json({ success: true, message: "Invitation accepted" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -60,11 +100,14 @@ export const rejectInvitation = async (req, res) => {
     const { invitationId } = req.body;
     const userId = req.user._id;
     const invitation = await Invitation.findOne({ _id: invitationId, receiver: userId });
+
     if (!invitation) {
       return res.status(404).json({ success: false, message: "Invitation not found" });
     }
+
     invitation.status = "rejected";
     await invitation.save();
+
     res.json({ success: true, message: "Invitation rejected" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
