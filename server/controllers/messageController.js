@@ -2,7 +2,7 @@ import Message from "../models/Message.js"
 import User from "../models/User.js"
 import Invitation from "../models/Invitation.js"
 import cloudinary from "../lib/cloudinary.js"
-import { io, userSocketMap } from "../server.js"
+import { io, getSocketId } from "../server.js"
 import { areUsersFriends } from "../lib/friendship.js"
 
 // Get all users (friends) for sidebar
@@ -158,7 +158,7 @@ export const markMessagesAsSeen = async (req, res) => {
             await message.save()
 
             // Notify sender that message was seen
-            const senderSocketId = userSocketMap[message.senderId.toString()]
+            const senderSocketId = getSocketId(message.senderId)
             if (senderSocketId) {
                 io.to(senderSocketId).emit("messageSeen", {
                     messageId: message._id,
@@ -250,13 +250,13 @@ export const sendMessage = async (req, res) => {
         await newMessage.populate("senderId", "fullName email profilePic")
 
         // Emit the new message to receiver's socket
-        const receiverSocketId = userSocketMap[receiverId]
+        const receiverSocketId = getSocketId(receiverId)
         if (receiverSocketId) {
             io.to(receiverSocketId).emit("newMessage", newMessage)
         }
 
         // Also emit to sender's other devices (if any)
-        const senderSocketId = userSocketMap[senderId]
+        const senderSocketId = getSocketId(senderId)
         if (senderSocketId && senderSocketId !== receiverSocketId) {
             io.to(senderSocketId).emit("newMessage", newMessage)
         }
