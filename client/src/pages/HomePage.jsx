@@ -37,9 +37,10 @@ const HomePage = () => {
     }
   }, [authUser])
 
-  // Get online friends count
+  // Get online friends count (with null check)
   const onlineFriendsCount = onlineUser?.filter(id => id !== authUser?._id).length || 0
 
+  // Show loading state
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#1a1a1e] to-[#2d2d35]">
@@ -49,6 +50,25 @@ const HomePage = () => {
             <MessageCircle className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-violet-400" size={24} />
           </div>
           <p className="mt-4 text-gray-400 animate-pulse">Loading your chats...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If not authenticated, show login message (though router should handle this)
+  if (!authUser) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#1a1a1e] to-[#2d2d35]">
+        <div className="text-center p-8 bg-white/5 backdrop-blur-xl rounded-2xl border border-gray-700/50">
+          <MessageCircle size={48} className="mx-auto text-violet-400 mb-3" />
+          <h3 className="text-xl font-semibold text-white mb-2">Not Authenticated</h3>
+          <p className="text-gray-400 mb-4">Please log in to continue</p>
+          <button
+            onClick={() => window.location.href = '/login'}
+            className="px-6 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors"
+          >
+            Go to Login
+          </button>
         </div>
       </div>
     )
@@ -66,12 +86,12 @@ const HomePage = () => {
         </div>
       )}
 
-      {/* Welcome Toast */}
+      {/* Welcome Toast - with null check */}
       {showWelcome && authUser && (
         <div className="fixed top-4 right-4 bg-green-500/90 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-slideInRight">
           <div className="flex items-center gap-2">
             <Wifi size={16} />
-            <span className="text-sm">Welcome back, {authUser.fullName}!</span>
+            <span className="text-sm">Welcome back, {authUser.fullName || 'User'}!</span>
           </div>
         </div>
       )}

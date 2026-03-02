@@ -63,25 +63,26 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = useCallback(async () => {
         setIsLoading(true);
         try {
+            // Use the correct endpoint - make sure this matches your backend
             const { data } = await axios.get("/api/auth/check", {
-                headers: { token }
+                headers: { Authorization: `Bearer ${token}` } // Use Bearer token format
             });
 
             if (data.success && isMounted.current) {
                 setAuthUser(data.user);
                 connectSocket(data.user);
             } else if (!data.success && isMounted.current) {
-                // Clear invalid token
                 localStorage.removeItem("token");
                 setToken(null);
-                delete axios.defaults.headers.common["token"];
+                delete axios.defaults.headers.common["Authorization"];
             }
         } catch (error) {
             console.error("Auth check failed:", error);
-            if (isMounted.current) {
+            if (error.response?.status === 401) {
+                // Token expired or invalid
                 localStorage.removeItem("token");
                 setToken(null);
-                delete axios.defaults.headers.common["token"];
+                delete axios.defaults.headers.common["Authorization"];
             }
         } finally {
             if (isMounted.current) {
