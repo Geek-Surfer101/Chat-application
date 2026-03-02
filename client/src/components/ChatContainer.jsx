@@ -1,7 +1,7 @@
-import React, { useContext, useEffect, useState, useRef } from "react";
+import React, { useContext, useEffect, useState, useRef, useCallback } from "react";
 import assets from "../assets/assets";
 import { AuthContext } from "../../context/AuthContext";
-import {ChatContext} from "../../context/ChatContext.jsx";
+import { ChatContext } from "../../context/ChatContext.jsx";
 import toast from "react-hot-toast";
 
 const ChatContainer = () => {
@@ -11,188 +11,383 @@ const ChatContainer = () => {
         setSelectedUser,
         sendMessage,
         getMessages,
+        isMessagesLoading,
     } = useContext(ChatContext);
     const { authUser, onlineUser } = useContext(AuthContext);
 
     const [input, setInput] = useState("");
+    const [isSending, setIsSending] = useState(false);
+    const [isTyping, setIsTyping] = useState(false);
     const scrollEnd = useRef(null);
+    const fileInputRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
 
-    // handle sending a message
+    // Handle sending a message
     const handleSendMessage = async (e) => {
-        e.preventDefault();
-        if (input.trim() === "") return null;
-        await sendMessage({ text: input.trim() });
-        setInput("");
+        e?.preventDefault();
+
+        if (input.trim() === "" && !isSending) return null;
+
+        setIsSending(true);
+        const messageText = input.trim();
+        setInput(""); // Clear input immediately for better UX
+
+        const success = await sendMessage({ text: messageText });
+
+        if (!success) {
+            setInput(messageText); // Restore if failed
+        }
+
+        setIsSending(false);
     };
 
-    // handle sending an image
+    // Handle sending an image
     const handleSendImage = async (e) => {
         const file = e.target.files[0];
-        if (!file || !file.type.startsWith("image/")) {
-            toast.error("Select an image file!");
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith("image/")) {
+            toast.error("Please select an image file (JPEG, PNG, GIF)");
+            if (fileInputRef.current) fileInputRef.current.value = "";
             return;
         }
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-            await sendMessage({ image: reader.result });
-            e.target.value = "";
-        };
-        reader.readAsDataURL(file);
+
+        // Validate file size (max 5MB)
+        const maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.size > maxSize) {
+            toast.error("Image too large. Maximum size is 5MB");
+            if (fileInputRef.current) fileInputRef.current.value = "";
+            return;
+        }
+
+        setIsSending(true);
+        toast.loading("Uploading image...", { id: "imageUpload" });
+
+        try {
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const success = await sendMessage({ image: reader.result });
+                if (success) {
+                    toast.success("Image sent!", { id: "imageUpload" });
+                } else {
+                    toast.error("Failed to send image", { id: "imageUpload" });
+                }
+                setIsSending(false);
+            };
+            reader.readAsDataURL(file);
+        } catch (error) {
+            console.error("Error sending image:", error);
+            toast.error("Failed to send image", { id: "imageUpload" });
+            setIsSending(false);
+        } finally {
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
     };
 
+    // Handle typing indicator
+    const handleTyping = () => {
+        if (!isTyping) {
+            setIsTyping(true);
+            // Emit typing event via socket if needed
+        }
+
+        // Clear previous timeout
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        // Set new timeout to stop typing indicator
+        typingTimeoutRef.current = setTimeout(() => {
+            setIsTyping(false);
+        }, 1000);
+    };
+
+    // Handle key press (Enter to send)
+    const handleKeyPress = (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSendMessage();
+        }
+    };
+
+    // Format message time
+    const formatMessageTime = (timestamp) => {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const isToday = date.toDateString() === now.toDateString();
+
+        if (isToday) {
+            return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        } else {
+            return date.toLocaleDateString([], { month: "short", day: "numeric" }) +
+                " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+    };
+
+    // Scroll to bottom when new messages arrive
+    useEffect(() => {
+        if (scrollEnd.current && messages.length > 0) {
+            scrollEnd.current.scrollIntoView({ behavior: "smooth", block: "end" });
+        }
+    }, [messages]);
+
+    // Load messages when selected user changes
     useEffect(() => {
         if (selectedUser) {
             getMessages(selectedUser._id);
         }
-    }, [selectedUser]);
 
-    useEffect(() => {
-        if (scrollEnd.current && messages) {
-            scrollEnd.current.scrollIntoView({ behavior: "smooth" });
-        }
-    }, [messages]);
+        // Cleanup typing timeout on unmount or user change
+        return () => {
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current);
+            }
+        };
+    }, [selectedUser, getMessages]);
 
-    return selectedUser ? (
-        <div className="h-full overflow-scroll relative backdrop-blur-lg">
-            {/* ------------header------------- */}
-            <div className="flex items-center gap-3 py-3 mx-4 border-b border-stone-500">
+    // If no user selected, show welcome screen
+    if (!selectedUser) {
+        return (
+            <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 bg-white/5 max-md:hidden">
+                <img
+                    src={assets.logo_icon}
+                    alt="QuickChat Logo"
+                    className="max-w-20 opacity-50"
+                />
+                <p className="text-lg font-medium text-white/70">
+                    Select a friend to start chatting
+                </p>
+                <p className="text-sm text-white/50">
+                    Chat anytime, anywhere.
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="h-full flex flex-col relative backdrop-blur-lg bg-[#1a1a1e]/30">
+            {/* Header */}
+            <div className="flex items-center gap-3 py-3 px-4 border-b border-stone-500/30 bg-[#1e1e24]/50">
                 <img
                     src={selectedUser.profilePic || assets.avatar_icon}
-                    alt=""
-                    className="w-8 rounded-full"
+                    alt={selectedUser.fullName}
+                    className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30"
                 />
-                <p className="flex-1 text-lg text-white flex items-center gap-2">
-                    {selectedUser.fullName}
-                    {onlineUser.includes(selectedUser._id) ? (
-                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    ) : (
-                        <span className="w-2 h-2 rounded-full bg-gray-400"></span>
+                <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                        <p className="text-lg text-white font-medium">
+                            {selectedUser.fullName}
+                        </p>
+                        {onlineUser.includes(selectedUser._id) ? (
+                            <span className="flex items-center gap-1 text-xs text-green-400">
+                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                Online
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                                <span className="w-2 h-2 rounded-full bg-gray-500"></span>
+                                Offline
+                            </span>
+                        )}
+                    </div>
+                    {isTyping && (
+                        <p className="text-xs text-violet-400 animate-pulse">
+                            typing...
+                        </p>
                     )}
-                </p>
-                <img
+                </div>
+                <button
                     onClick={() => setSelectedUser(null)}
-                    src={assets.arrow_icon}
-                    className="md:hidden max-w-7"
-                />
+                    className="md:hidden p-2 hover:bg-white/10 rounded-full transition-colors"
+                    aria-label="Close chat"
+                >
+                    <img src={assets.arrow_icon} className="w-5 h-5" alt="Back" />
+                </button>
                 <img
                     src={assets.help_icon}
-                    alt=""
-                    className="max-md:hidden max-w-5"
+                    alt="Help"
+                    className="max-md:hidden w-5 h-5 opacity-50 hover:opacity-100 cursor-help transition-opacity"
+                    title="QuickChat - Real-time messaging"
                 />
             </div>
-            {/* ------------chat area------------- */}
-            <div className="flex flex-col h-[calc(100%-120px)] overflow-y-scroll p-3 pb-6">
-                {messages.map((msg, index) => {
-                    const isSender =
-                        msg.senderId?.toString() === authUser._id?.toString();
-                    // Format time (hh:mm AM/PM)
-                    const time = new Date(msg.createdAt).toLocaleTimeString(
-                        [],
-                        { hour: "2-digit", minute: "2-digit" }
-                    );
 
-                    return (
-                        <div
-                            key={index}
-                            className={`flex items-end gap-2 mb-2 ${
-                                isSender ? "justify-end" : "justify-start"
-                            }`}
-                        >
-                            {/* Avatar and time for receiver */}
-                            {!isSender && (
-                                <div className="flex flex-col items-center min-w-[40px]">
-                                    <img
-                                        src={
-                                            selectedUser?.profilePic ||
-                                            assets.avatar_icon
-                                        }
-                                        className="w-7 rounded-full"
-                                        alt=""
-                                    />
-                                    <span className="text-[10px] text-gray-400 mt-1">
-                                        {time}
-                                    </span>
-                                </div>
-                            )}
-                            {/* Message bubble */}
-                            {msg.image ? (
-                                <img
-                                    src={msg.image}
-                                    className="max-w-[230px] border border-gray-700 rounded-lg overflow-hidden mb-8"
-                                    alt=""
-                                />
-                            ) : (
-                                <p
-                                    className={`p-2 max-w-[200px] md:text-sm font-light rounded-lg mb-8 break-all ${
-                                        isSender
-                                            ? "bg-violet-500/30 text-white rounded-br-none"
-                                            : "bg-[#282142] text-white rounded-bl-none"
+            {/* Chat Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
+                {isMessagesLoading ? (
+                    <div className="flex justify-center items-center h-full">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500"></div>
+                    </div>
+                ) : messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                        <p className="text-center text-white/50">
+                            No messages yet. Start a conversation!
+                        </p>
+                    </div>
+                ) : (
+                    messages.map((msg, index) => {
+                        const isSender = msg.senderId?.toString() === authUser._id?.toString();
+                        const showAvatar = index === 0 ||
+                            messages[index - 1]?.senderId?.toString() !== msg.senderId?.toString();
+
+                        return (
+                            <div
+                                key={msg._id || index}
+                                className={`flex items-end gap-2 ${isSender ? "justify-end" : "justify-start"
                                     }`}
-                                >
-                                    {msg.text}
-                                </p>
-                            )}
-                            {/* Avatar and time for sender */}
-                            {isSender && (
-                                <div className="flex flex-col items-center min-w-[40px]">
-                                    <img
-                                        src={
-                                            authUser?.profilePic ||
-                                            assets.avatar_icon
-                                        }
-                                        className="w-7 rounded-full"
-                                        alt=""
-                                    />
-                                    <span className="text-[10px] text-gray-400 mt-1">
-                                        {time}
-                                    </span>
+                            >
+                                {/* Avatar for receiver */}
+                                {!isSender && showAvatar && (
+                                    <div className="flex-shrink-0">
+                                        <img
+                                            src={selectedUser?.profilePic || assets.avatar_icon}
+                                            alt={selectedUser?.fullName}
+                                            className="w-8 h-8 rounded-full object-cover"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Spacer for alignment when no avatar */}
+                                {!isSender && !showAvatar && <div className="w-8"></div>}
+
+                                {/* Message bubble */}
+                                <div className={`flex flex-col max-w-[70%] ${isSender ? 'items-end' : 'items-start'}`}>
+                                    {msg.image ? (
+                                        <div className="relative group">
+                                            <img
+                                                src={msg.image}
+                                                alt="Shared image"
+                                                className="max-w-[250px] max-h-[300px] rounded-lg border border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
+                                                onClick={() => window.open(msg.image, '_blank')}
+                                            />
+                                            <span className="text-[10px] text-gray-400 mt-1 block">
+                                                {formatMessageTime(msg.createdAt)}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div
+                                                className={`px-4 py-2 rounded-2xl break-words ${isSender
+                                                        ? "bg-violet-600 text-white rounded-br-none"
+                                                        : "bg-[#2b2b36] text-white rounded-bl-none"
+                                                    }`}
+                                            >
+                                                <p className="text-sm">{msg.text}</p>
+                                            </div>
+                                            <span className="text-[10px] text-gray-400 mt-1 px-1">
+                                                {formatMessageTime(msg.createdAt)}
+                                                {isSender && (
+                                                    <span className="ml-2">
+                                                        {msg.seen ? (
+                                                            <span className="text-blue-400" title="Seen">✓✓</span>
+                                                        ) : (
+                                                            <span className="text-gray-500" title="Sent">✓</span>
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                    );
-                })}
-                <div ref={scrollEnd}></div>
+
+                                {/* Avatar for sender */}
+                                {isSender && showAvatar && (
+                                    <div className="flex-shrink-0">
+                                        <img
+                                            src={authUser?.profilePic || assets.avatar_icon}
+                                            alt={authUser?.fullName}
+                                            className="w-8 h-8 rounded-full object-cover"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
+                <div ref={scrollEnd} />
             </div>
-            {/*-----------Bottom area----------------- */}
-            <div className="absolute bottom-0 left-0 right-0 flex items-center gap-3 p-3">
-                <div className="flex-1 flex items-center bg-gray-100/12 px-3 rounded-full">
-                    <input
-                        onChange={(e) => setInput(e.target.value)}
-                        value={input}
-                        onKeyDown={(e) =>
-                            e.key === "Enter" ? handleSendMessage(e) : null
-                        }
-                        type="text"
-                        placeholder="Send a message"
-                        className="flex-1 text-sm p-3 border-none rounded-lg outline-none text-white placeholder-gray-400"
-                    />
-                    <input
-                        onChange={handleSendImage}
-                        type="file"
-                        id="image"
-                        accept="image/png, image/jpeg, image/jpg"
-                        hidden
-                    />
-                    <label htmlFor="image">
-                        <img
-                            src={assets.gallery_icon}
-                            className="w-5 mr-2 cursor-pointer"
+
+            {/* Message Input Area */}
+            <div className="p-4 bg-[#1e1e24]/80 border-t border-stone-500/30">
+                <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+                    <div className="flex-1 flex items-center bg-[#2b2b36] rounded-full px-4 py-2">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => {
+                                setInput(e.target.value);
+                                handleTyping();
+                            }}
+                            onKeyDown={handleKeyPress}
+                            placeholder="Type a message..."
+                            className="flex-1 bg-transparent border-none outline-none text-white placeholder-gray-500 text-sm"
+                            disabled={isSending}
+                            maxLength={1000}
                         />
-                    </label>
-                </div>
-                <img
-                    onClick={handleSendMessage}
-                    src={assets.send_button}
-                    className="w-7 cursor-pointer"
-                />
+
+                        {/* Hidden file input */}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            id="image-upload"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            onChange={handleSendImage}
+                            className="hidden"
+                            disabled={isSending}
+                        />
+
+                        {/* Image upload button */}
+                        <label
+                            htmlFor="image-upload"
+                            className={`cursor-pointer p-2 rounded-full hover:bg-white/10 transition-colors ${isSending ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                            onClick={(e) => {
+                                if (isSending) {
+                                    e.preventDefault();
+                                    toast.error("Please wait for current message to send");
+                                }
+                            }}
+                        >
+                            <img
+                                src={assets.gallery_icon}
+                                alt="Upload image"
+                                className="w-5 h-5"
+                            />
+                        </label>
+                    </div>
+
+                    {/* Send button */}
+                    <button
+                        type="submit"
+                        disabled={isSending || !input.trim()}
+                        className={`p-3 rounded-full transition-all ${isSending || !input.trim()
+                                ? 'bg-gray-600 cursor-not-allowed'
+                                : 'bg-violet-600 hover:bg-violet-700 hover:scale-105 active:scale-95'
+                            }`}
+                        aria-label="Send message"
+                    >
+                        {isSending ? (
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                            <img
+                                src={assets.send_button}
+                                alt="Send"
+                                className="w-5 h-5"
+                            />
+                        )}
+                    </button>
+                </form>
+
+                {/* Character counter */}
+                {input.length > 800 && (
+                    <div className="text-right mt-1">
+                        <span className={`text-xs ${input.length > 950 ? 'text-red-500' : 'text-yellow-500'
+                            }`}>
+                            {input.length}/1000
+                        </span>
+                    </div>
+                )}
             </div>
-        </div>
-    ) : (
-        <div className="flex flex-col items-center justify-center gap-2 text-gray-500 bg-white/10 max-md:hidden">
-            <img src={assets.logo_icon} alt="" className="max-w-16" />
-            <p className="text-lg font-medium text-white">
-                Chat anytime, anywhere.
-            </p>
         </div>
     );
 };
