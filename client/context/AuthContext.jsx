@@ -22,11 +22,14 @@ export const AuthProvider = ({ children }) => {
     const connectSocket = useCallback((userData) => {
         if (!userData?._id) return;
 
-        // Disconnect existing socket
-        if (socket) {
-            socket.removeAllListeners();
-            socket.disconnect();
-        }
+        // Disconnect existing socket via functional update to avoid dependency on socket
+        setSocket((prevSocket) => {
+            if (prevSocket) {
+                prevSocket.removeAllListeners();
+                prevSocket.disconnect();
+            }
+            return prevSocket;
+        });
 
         // Create new socket connection
         const newSocket = io(backendUrl, {
@@ -57,7 +60,7 @@ export const AuthProvider = ({ children }) => {
         });
 
         setSocket(newSocket);
-    }, [socket]);
+    }, []);
 
     // Check auth status
     const checkAuth = useCallback(async () => {
@@ -170,12 +173,15 @@ export const AuthProvider = ({ children }) => {
         // Cleanup on unmount
         return () => {
             isMounted.current = false;
-            if (socket) {
-                socket.removeAllListeners();
-                socket.disconnect();
-            }
+            setSocket((prevSocket) => {
+                if (prevSocket) {
+                    prevSocket.removeAllListeners();
+                    prevSocket.disconnect();
+                }
+                return null;
+            });
         };
-    }, [token, checkAuth, socket]);
+    }, []); // Run only on mount
 
     const value = {
         axios,
